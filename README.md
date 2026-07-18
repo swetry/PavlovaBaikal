@@ -12,5 +12,7 @@
 git clone <repo-url>
 cd safe-sql-runner
 pip install -r requirements.txt
-cp .env.example .env
+cp .env.example .env```
+
+
 ## Отредактируйте .env под свою БД
