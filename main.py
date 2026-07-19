@@ -5,11 +5,13 @@ from getpass import getpass
 
 import psycopg2
 from dotenv import load_dotenv
-from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
 
-def load_config():
+DEFAULT_LIMIT = 5
+
+
+def load_config() -> dict[str, str | None]:
     """Загружает конфигурацию из .env или запрашивает ввод."""
     load_dotenv()
 
@@ -34,46 +36,55 @@ def load_config():
 
 
 def is_select_only(query: str) -> bool:
-    """Проверяет, что запрос начинается с SELECT и не содержит опасных конструкций."""
+    """
+    Проверяет, что ВСЕ запросы в пакете начинаются с SELECT и безопасны.
+    Разбивает пакетные запросы по точке с запятой.
+    """
     query_upper = query.strip().upper()
-
-    # Базовый чек: начинается ли с SELECT
-    if not query_upper.startswith("SELECT"):
+    
+    # Разбиваем по точке с запятой, убираем пустые строки и пробелы
+    statements = [stmt.strip() for stmt in query_upper.split(';') if stmt.strip()]
+    if not statements:
         return False
 
-    # Чёрный список ключевых слов, которые могут изменить данные
     dangerous_keywords = [
-        "DELETE",
-        "UPDATE",
-        "INSERT",
-        "ALTER",
-        "DROP",
-        "CREATE",
-        "TRUNCATE",
-        "MERGE",
-        "REPLACE",
+        "DELETE", "UPDATE", "INSERT", "ALTER", "DROP", "CREATE", 
+        "TRUNCATE", "MERGE", "REPLACE", "WITH"
     ]
-    for keyword in dangerous_keywords:
-        # Ищем целые слова, чтобы не задеть подстроки
-        if re.search(rf"\b{keyword}\b", query_upper):
+    
+    for statement in statements:
+        # Каждый непустой сегмент должен начинаться строго с SELECT
+        if not statement.startswith("SELECT"):
             return False
-
+        
+        # Ищем опасные слова внутри сегмента как целые слова
+        for keyword in dangerous_keywords:
+            if re.search(rf"\b{keyword}\b", statement):
+                return False
+                
     return True
 
 
 def add_limit_if_missing(query: str) -> str:
-    """Добавляет LIMIT 5, если его нет и запрос — SELECT."""
-    query_upper = query.strip().upper()
-    if "LIMIT" not in query_upper:
-        # Добавляем в конец, учитывая точку с запятой
-        if query.strip().endswith(";"):
-            query = query.rstrip(";") + " LIMIT 5;"
-        else:
-            query = query + " LIMIT 5"
-    return query
+    """
+    Добавляет LIMIT 5, если его нет и запрос — SELECT.
+    Корректно обрабатывает завершающую точку с запятой.
+    """
+    stripped_query = query.strip()
+    query_upper = stripped_query.upper()
+    
+    # Если уже есть LIMIT (в любом регистре), ничего не меняем
+    if "LIMIT" in query_upper:
+        return query
+
+    # Добавляем LIMIT перед завершающей точкой с запятой или в конец
+    if stripped_query.endswith(";"):
+        return f"{stripped_query[:-1]} LIMIT {DEFAULT_LIMIT};"
+    
+    return f"{query} LIMIT {DEFAULT_LIMIT}"
 
 
-def execute_query(conn, query: str):
+def execute_query(conn, query: str) -> list[dict]:
     """Выполняет запрос и возвращает результат."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(query)
@@ -82,14 +93,17 @@ def execute_query(conn, query: str):
         return []
 
 
-def print_table(results):
+def print_table(results: list[dict]) -> None:
     """Выводит результат в виде таблицы."""
     if not results:
         print("Запрос выполнен, но результат пуст.")
         return
 
     columns = results[0].keys()
-    col_widths = {col: max(len(str(col)), max((len(str(row[col])) for row in results), default=0)) for col in columns}
+    col_widths = {
+        col: max(len(str(col)), max((len(str(row[col])) for row in results), default=0)) 
+        for col in columns
+    }
     total_width = sum(col_widths.values()) + len(columns) * 3 + 1
 
     # Шапка
@@ -110,37 +124,36 @@ def main():
     config = load_config()
 
     try:
-        conn = psycopg2.connect(**config)
-        print("Подключение к PostgreSQL установлено.")
+        # Используем менеджер контекста для гарантированного закрытия соединения
+        with psycopg2.connect(**config) as conn:
+            print("Подключение к PostgreSQL установлено.")
+
+            while True:
+                query = input("\nВведите SQL-запрос (или 'exit' для выхода):\n> ").strip()
+                if query.lower() in ("exit", "quit", "q"):
+                    break
+                if not query:
+                    continue
+
+                if not is_select_only(query):
+                    print("Ошибка: разрешены только SELECT-запросы")
+                    continue
+
+                query = add_limit_if_missing(query)
+                print(f"Выполняется запрос:\n{query}")
+
+                try:
+                    results = execute_query(conn, query)
+                    print("\nРезультат:")
+                    print_table(results)
+                except Exception as e:
+                    print(f"Ошибка выполнения запроса: {e}")
+                    
     except Exception as e:
         print(f"Ошибка подключения: {e}")
         sys.exit(1)
 
-    try:
-        while True:
-            query = input("\n Введите SQL-запрос (или 'exit' для выхода):\n> ").strip()
-            if query.lower() in ("exit", "quit", "q"):
-                break
-            if not query:
-                continue
-
-            if not is_select_only(query):
-                print("Ошибка: разрешены только SELECT-запросы")
-                continue
-
-            query = add_limit_if_missing(query)
-            print(f"Выполняется запрос:\n{query}")
-
-            try:
-                results = execute_query(conn, query)
-                print("\n Результат:")
-                print_table(results)
-            except Exception as e:
-                print(f"Ошибка выполнения запроса: {e}")
-
-    finally:
-        conn.close()
-        print("\n Соединение закрыто.")
+    print("\n Соединение закрыто.")
 
 
 if __name__ == "__main__":
