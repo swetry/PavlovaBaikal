@@ -44,7 +44,7 @@ python main.py<br>
 sql<br>
 SELECT * FROM users;<br>
 Выполняется запрос:<br>
-SELECT * FROM students LIMIT 5;<br>
+SELECT * FROM users LIMIT 5;<br>
 Результат в консоли:<br>
 
 | id   | name         | age | group_name       |<br>
