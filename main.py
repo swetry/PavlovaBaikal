@@ -6,13 +6,9 @@ from getpass import getpass
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
-
-
 DEFAULT_LIMIT = 5
 
-
 def load_config() -> dict[str, str | None]:
-    """Загружает конфигурацию из .env или запрашивает ввод."""
     load_dotenv()
 
     config = {
@@ -23,7 +19,6 @@ def load_config() -> dict[str, str | None]:
         "password": os.getenv("DB_PASSWORD"),
     }
 
-    # Если переменные не заданы — запрашиваем интерактивно
     if not all(config.values()):
         print("Не найдены переменные окружения. Введите данные вручную:")
         config["host"] = input("Хост (по умолчанию localhost): ") or "localhost"
@@ -33,16 +28,8 @@ def load_config() -> dict[str, str | None]:
         config["password"] = getpass("Пароль: ")
 
     return config
-
-
 def is_select_only(query: str) -> bool:
-    """
-    Проверяет, что ВСЕ запросы в пакете начинаются с SELECT и безопасны.
-    Разбивает пакетные запросы по точке с запятой.
-    """
     query_upper = query.strip().upper()
-    
-    # Разбиваем по точке с запятой, убираем пустые строки и пробелы
     statements = [stmt.strip() for stmt in query_upper.split(';') if stmt.strip()]
     if not statements:
         return False
@@ -53,31 +40,18 @@ def is_select_only(query: str) -> bool:
     ]
     
     for statement in statements:
-        # Каждый непустой сегмент должен начинаться строго с SELECT
         if not statement.startswith("SELECT"):
             return False
-        
-        # Ищем опасные слова внутри сегмента как целые слова
         for keyword in dangerous_keywords:
             if re.search(rf"\b{keyword}\b", statement):
-                return False
-                
+                return False      
     return True
-
-
 def add_limit_if_missing(query: str) -> str:
-    """
-    Добавляет LIMIT 5, если его нет и запрос — SELECT.
-    Корректно обрабатывает завершающую точку с запятой.
-    """
     stripped_query = query.strip()
     query_upper = stripped_query.upper()
-    
-    # Если уже есть LIMIT (в любом регистре), ничего не меняем
     if "LIMIT" in query_upper:
         return query
 
-    # Добавляем LIMIT перед завершающей точкой с запятой или в конец
     if stripped_query.endswith(";"):
         return f"{stripped_query[:-1]} LIMIT {DEFAULT_LIMIT};"
     
@@ -85,7 +59,6 @@ def add_limit_if_missing(query: str) -> str:
 
 
 def execute_query(conn, query: str) -> list[dict]:
-    """Выполняет запрос и возвращает результат."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(query)
         if cur.description:
@@ -94,7 +67,6 @@ def execute_query(conn, query: str) -> list[dict]:
 
 
 def print_table(results: list[dict]) -> None:
-    """Выводит результат в виде таблицы."""
     if not results:
         print("Запрос выполнен, но результат пуст.")
         return
@@ -106,55 +78,43 @@ def print_table(results: list[dict]) -> None:
     }
     total_width = sum(col_widths.values()) + len(columns) * 3 + 1
 
-    # Шапка
     print("-" * total_width)
     header = "| " + " | ".join(f"{col:<{col_widths[col]}}" for col in columns) + " |"
     print(header)
     print("-" * total_width)
 
-    # Строки
     for row in results:
         line = "| " + " | ".join(f"{str(row[col]):<{col_widths[col]}}" for col in columns) + " |"
         print(line)
     print("-" * total_width)
     print(f"Всего строк: {len(results)}")
 
-
 def main():
     config = load_config()
-
     try:
-        # Используем менеджер контекста для гарантированного закрытия соединения
         with psycopg2.connect(**config) as conn:
             print("Подключение к PostgreSQL установлено.")
-
             while True:
                 query = input("\nВведите SQL-запрос (или 'exit' для выхода):\n> ").strip()
                 if query.lower() in ("exit", "quit", "q"):
                     break
                 if not query:
                     continue
-
                 if not is_select_only(query):
                     print("Ошибка: разрешены только SELECT-запросы")
                     continue
-
                 query = add_limit_if_missing(query)
                 print(f"Выполняется запрос:\n{query}")
-
                 try:
                     results = execute_query(conn, query)
                     print("\nРезультат:")
                     print_table(results)
                 except Exception as e:
-                    print(f"Ошибка выполнения запроса: {e}")
-                    
+                    print(f"Ошибка выполнения запроса: {e}")   
     except Exception as e:
         print(f"Ошибка подключения: {e}")
         sys.exit(1)
-
     print("\n Соединение закрыто.")
-
 
 if __name__ == "__main__":
     main()
