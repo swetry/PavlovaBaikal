@@ -2,13 +2,14 @@ import os
 import re
 import sys
 from getpass import getpass
+from typing import Optional
 
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 DEFAULT_LIMIT = 5
 
-def load_config() -> dict[str, str | None]:
+def load_config() -> dict[str, Optional[str]]:
     load_dotenv()
 
     config = {
